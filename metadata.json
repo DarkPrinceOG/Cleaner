@@ -1,0 +1,6 @@
+{
+  "name": "Storage Cleaner",
+  "description": "Native Android storage cleaner featuring swipe-based photo and video review, safe persistent deletion queue, and storage stats.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

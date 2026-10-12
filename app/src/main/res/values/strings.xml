@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Storage Cleaner</string>
+    <string name="title_home">Home</string>
+    <string name="title_swipe_studio">Swipe Studio</string>
+    <string name="title_review_queue">Review Queue</string>
+    <string name="title_cloud_photos">Google Photos</string>
+    <string name="title_settings">Settings</string>
+    <string name="btn_start_cleaning">Start Cleaning</string>
+    <string name="action_keep">Keep</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_skip">Skip</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_confirm_deletion">Empty Trash &amp; Free Space</string>
+</resources>

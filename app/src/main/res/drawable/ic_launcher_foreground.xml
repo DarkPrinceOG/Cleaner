@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="0"
+        android:translateY="0">
+        <!-- Storage stack base plates -->
+        <path
+            android:fillColor="#374151"
+            android:pathData="M32,66 L76,66 C78.2,66 80,67.8 80,70 L80,72 C80,74.2 78.2,76 76,76 L32,76 C29.8,76 28,74.2 28,72 L28,70 C28,67.8 29.8,66 32,66 Z" />
+        <path
+            android:fillColor="#1F2937"
+            android:pathData="M32,54 L76,54 C78.2,54 80,55.8 80,58 L80,60 C80,62.2 78.2,64 76,64 L32,64 C29.8,64 28,62.2 28,60 L28,58 C28,55.8 29.8,54 32,54 Z" />
+        <!-- Storage indicator LED -->
+        <path
+            android:fillColor="#EF4444"
+            android:pathData="M34,70 A 1.5,1.5 0 1 0 34,72 A 1.5,1.5 0 1 0 34,70 Z" />
+        <path
+            android:fillColor="#10B981"
+            android:pathData="M34,58 A 1.5,1.5 0 1 0 34,60 A 1.5,1.5 0 1 0 34,58 Z" />
+
+        <!-- Dynamic Cleaner Broom / Sweep angled across -->
+        <!-- Broom handle -->
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="3.2"
+            android:strokeLineCap="round"
+            android:pathData="M75,25 L53,47" />
+        <!-- Fastener collar in crimson -->
+        <path
+            android:fillColor="#DC2626"
+            android:pathData="M49.5,43.5 L56.5,50.5 L53,54 L46,47 Z" />
+        <!-- Bristles / sweep fan -->
+        <path
+            android:fillColor="#EF4444"
+            android:pathData="M48,49 L55,56 L46,71 C44.5,73 41.5,73.5 39,72 L36,70 C33.5,68.5 33,65.5 35,64 Z" />
+        <path
+            android:strokeColor="#FCA5A5"
+            android:strokeWidth="1.2"
+            android:strokeLineCap="round"
+            android:pathData="M42,57 L38,67" />
+        <path
+            android:strokeColor="#FCA5A5"
+            android:strokeWidth="1.2"
+            android:strokeLineCap="round"
+            android:pathData="M47,61 L42,69" />
+
+        <!-- Sparkles / clean stars -->
+        <!-- Sparkle 1 top right -->
+        <path
+            android:fillColor="#F87171"
+            android:pathData="M70,36 L71.5,39.5 L75,41 L71.5,42.5 L70,46 L68.5,42.5 L65,41 L68.5,39.5 Z" />
+        <!-- Sparkle 2 small -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M78,48 L79,50 L81,51 L79,52 L78,54 L77,52 L75,51 L77,50 Z" />
+        <!-- Sparkle 3 near bottom left -->
+        <path
+            android:fillColor="#FCA5A5"
+            android:pathData="M29,46 L30,48 L32,49 L30,50 L29,52 L28,50 L26,49 L28,48 Z" />
+    </group>
+</vector>
