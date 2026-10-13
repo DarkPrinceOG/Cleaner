@@ -202,9 +202,8 @@ fun CleanerApp(
                         onNavigate = { viewModel.navigateTo(it) },
                         onStartCleaning = { viewModel.startCleaningSession() },
                         onRefreshStats = { viewModel.loadStorageStats() },
-                        onSelectFilter = { filter ->
-                            viewModel.updateSettings(uiState.settings.copy(filterType = filter))
-                        },
+                        onSelectCategory = { viewModel.selectCategory(it) },
+                        onRequestReset = { viewModel.requestResetHistory(it) },
                         onCheckPermissions = { viewModel.checkPermissions() }
                     )
 
@@ -212,6 +211,8 @@ fun CleanerApp(
                         uiState = uiState,
                         onBack = { viewModel.navigateTo(AppScreen.HOME) },
                         onNavigate = { viewModel.navigateTo(it) },
+                        onSelectCategory = { viewModel.selectCategory(it) },
+                        onRequestReset = { viewModel.requestResetHistory(it) },
                         onKeep = { viewModel.decideCurrent(ReviewDecision.KEEP) },
                         onDelete = { viewModel.decideCurrent(ReviewDecision.DELETE) },
                         onSkip = { viewModel.decideCurrent(ReviewDecision.SKIP) },
@@ -242,10 +243,24 @@ fun CleanerApp(
                         uiState = uiState,
                         onBack = { viewModel.navigateTo(AppScreen.HOME) },
                         onUpdateSettings = { newSettings -> viewModel.updateSettings(newSettings) },
+                        onRequestReset = { viewModel.requestResetHistory(it) },
                         onClearHistory = { viewModel.clearAllFromQueue() }
                     )
                 }
             }
         }
+    }
+
+    // Reset Review History Confirmation Dialog
+    if (uiState.showResetConfirmationDialog) {
+        com.example.ui.components.ResetConfirmationDialog(
+            scope = uiState.resetScope,
+            targetCategory = uiState.resetTargetCategory,
+            affectedCount = uiState.resetAffectedCount,
+            pendingDeleteCount = uiState.resetPendingDeleteCount,
+            isResetting = uiState.isResetting,
+            onConfirm = { viewModel.confirmResetHistory() },
+            onDismiss = { viewModel.dismissResetDialog() }
+        )
     }
 }

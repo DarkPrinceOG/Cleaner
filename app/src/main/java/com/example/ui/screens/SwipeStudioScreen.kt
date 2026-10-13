@@ -41,6 +41,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -67,8 +68,18 @@ import com.example.ui.theme.EmeraldKeep
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.example.model.SmartCategory
+import com.example.ui.components.SmartCategoryBar
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.CleanerUiState
+import com.example.viewmodel.ResetScope
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,6 +87,8 @@ fun SwipeStudioScreen(
     uiState: CleanerUiState,
     onBack: () -> Unit,
     onNavigate: (AppScreen) -> Unit,
+    onSelectCategory: (SmartCategory) -> Unit,
+    onRequestReset: (ResetScope) -> Unit,
     onKeep: () -> Unit,
     onDelete: () -> Unit,
     onSkip: () -> Unit,
@@ -87,6 +100,7 @@ fun SwipeStudioScreen(
     BackHandler { onBack() }
 
     val snackbarHostState = remember { SnackbarHostState() }
+    var showMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.snackbarMessage) {
         uiState.snackbarMessage?.let {
@@ -100,7 +114,7 @@ fun SwipeStudioScreen(
                 title = {
                     Column {
                         Text(
-                            text = "Swipe Studio",
+                            text = uiState.selectedCategory.label,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
@@ -108,7 +122,7 @@ fun SwipeStudioScreen(
                         val total = uiState.mediaQueue.size
                         val currentNum = (uiState.currentIndex + 1).coerceAtMost(total)
                         Text(
-                            text = if (total > 0) "File $currentNum of $total" else "No files loaded",
+                            text = if (total > 0) "File $currentNum of $total unreviewed" else "No unreviewed files",
                             style = MaterialTheme.typography.labelSmall,
                             color = TextSecondary,
                             fontSize = 11.sp
@@ -128,6 +142,41 @@ fun SwipeStudioScreen(
                     }
                 },
                 actions = {
+                    // Reset History Menu Button
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.testTag("action_reset_history_menu")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.RestartAlt,
+                                contentDescription = "Reset History",
+                                tint = TextSecondary
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Reset ${uiState.selectedCategory.label} History") },
+                                onClick = {
+                                    showMenu = false
+                                    onRequestReset(ResetScope.THIS_FOLDER)
+                                },
+                                modifier = Modifier.testTag("menu_reset_folder")
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Reset All History") },
+                                onClick = {
+                                    showMenu = false
+                                    onRequestReset(ResetScope.ALL)
+                                },
+                                modifier = Modifier.testTag("menu_reset_all")
+                            )
+                        }
+                    }
+
                     // Queue shortcut counter pill
                     Box(
                         modifier = Modifier
@@ -167,9 +216,17 @@ fun SwipeStudioScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Smart Category Selector Bar
+            SmartCategoryBar(
+                selectedCategory = uiState.selectedCategory,
+                categoryStats = uiState.categoryStats,
+                onSelectCategory = onSelectCategory,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
             // Linear progress indicator
             LinearProgressIndicator(
                 progress = { uiState.progressRatio },
@@ -203,10 +260,13 @@ fun SwipeStudioScreen(
                 } else {
                     // Finished Empty State
                     SessionCompletedCard(
+                        categoryLabel = uiState.selectedCategory.label,
                         reviewedCount = uiState.totalReviewedCount,
                         markedCount = uiState.markedCount,
                         markedBytes = uiState.markedTotalBytes,
                         onOpenQueue = { onNavigate(AppScreen.REVIEW_QUEUE) },
+                        onResetFolder = { onRequestReset(ResetScope.THIS_FOLDER) },
+                        onResetAll = { onRequestReset(ResetScope.ALL) },
                         onReload = onReload
                     )
                 }
@@ -352,10 +412,13 @@ private fun SwipeControlsRow(
 
 @Composable
 private fun SessionCompletedCard(
+    categoryLabel: String,
     reviewedCount: Int,
     markedCount: Int,
     markedBytes: Long,
     onOpenQueue: () -> Unit,
+    onResetFolder: () -> Unit,
+    onResetAll: () -> Unit,
     onReload: () -> Unit
 ) {
     Box(
@@ -364,7 +427,7 @@ private fun SessionCompletedCard(
             .clip(RoundedCornerShape(24.dp))
             .background(DarkSurfaceElevated)
             .border(1.5.dp, DarkBorder, RoundedCornerShape(24.dp))
-            .padding(28.dp),
+            .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -373,7 +436,7 @@ private fun SessionCompletedCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(68.dp)
                     .clip(CircleShape)
                     .background(CrimsonPrimary.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center
@@ -382,78 +445,90 @@ private fun SessionCompletedCard(
                     imageVector = Icons.Default.Check,
                     contentDescription = null,
                     tint = CrimsonBright,
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(36.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "Session Complete!",
-                style = MaterialTheme.typography.headlineMedium,
+                text = "All $categoryLabel Reviewed!",
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "$markedCount items marked for cleanup",
-                style = MaterialTheme.typography.titleMedium,
+                text = "$markedCount files marked for cleanup (${MediaItem.formatBytes(markedBytes)})",
+                style = MaterialTheme.typography.bodyMedium,
                 color = CrimsonBright,
                 fontWeight = FontWeight.SemiBold
             )
 
-            Text(
-                text = "Estimated recovery: ${MediaItem.formatBytes(markedBytes)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
-            )
+            Spacer(modifier = Modifier.height(18.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = onOpenQueue,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = CrimsonPrimary,
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("btn_view_queue_completed")
-            ) {
-                Text(
-                    text = "Review Marked Files (${markedCount})",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
+            if (markedCount > 0) {
+                Button(
+                    onClick = onOpenQueue,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CrimsonPrimary,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("btn_view_queue_completed")
+                ) {
+                    Text(
+                        text = "Review Marked Files ($markedCount)",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
+            // Reset This Folder Button
             Button(
-                onClick = onReload,
+                onClick = onResetFolder,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DarkBackground,
-                    contentColor = TextPrimary
+                    containerColor = DarkSurfaceElevated,
+                    contentColor = CrimsonBright
                 ),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
+                    .border(1.dp, CrimsonPrimary.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                    .testTag("btn_reset_folder_completed")
             ) {
                 Icon(
-                    imageVector = Icons.Default.Refresh,
+                    imageVector = Icons.Default.RestartAlt,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Scan More Media",
+                    text = "Reset $categoryLabel History",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Reset All History Text Button
+            TextButton(
+                onClick = onResetAll,
+                modifier = Modifier.testTag("btn_reset_all_completed")
+            ) {
+                Text(
+                    text = "Reset All Folders History",
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }

@@ -20,8 +20,18 @@ data class MediaItem(
     val width: Int? = null,
     val height: Int? = null,
     val bucketName: String? = null,
+    val relativePath: String? = null,
     val source: MediaSource = MediaSource.LOCAL
 ) {
+    val category: SmartCategory
+        get() = SmartCategoryDetector.detect(
+            isVideo = isVideo,
+            mimeType = mimeType,
+            displayName = displayName,
+            relativePath = relativePath,
+            bucketName = bucketName
+        )
+
     val formattedSize: String
         get() = formatBytes(sizeBytes)
 

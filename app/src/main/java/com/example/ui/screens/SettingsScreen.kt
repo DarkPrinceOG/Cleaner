@@ -62,7 +62,9 @@ import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import com.example.model.SmartCategory
 import com.example.viewmodel.CleanerUiState
+import com.example.viewmodel.ResetScope
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +72,7 @@ fun SettingsScreen(
     uiState: CleanerUiState,
     onBack: () -> Unit,
     onUpdateSettings: (CleanerSettings) -> Unit,
+    onRequestReset: (ResetScope) -> Unit,
     onClearHistory: () -> Unit
 ) {
     BackHandler { onBack() }
@@ -292,35 +295,71 @@ fun SettingsScreen(
                 }
             }
 
-            // Section: Storage Queue Reset
+            // Section: Review History Management
             item {
                 SectionHeader(
                     icon = Icons.Default.DeleteSweep,
-                    title = "Database & Session"
+                    title = "Review History Management"
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = onClearHistory,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DarkSurfaceElevated,
-                        contentColor = CrimsonBright
-                    ),
-                    shape = RoundedCornerShape(14.dp),
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp)
-                        .border(1.dp, CrimsonPrimary.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(DarkSurfaceElevated)
+                        .border(1.dp, DarkBorder, RoundedCornerShape(18.dp))
+                        .padding(16.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Reset Review Decisions Queue",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "Resetting review history clears KEEP and SKIP decisions so photos reappear for review. Crucially, actual files are never deleted and pending deletion decisions remain safely preserved in the Review Queue.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            lineHeight = 18.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Reset This Folder
+                        Button(
+                            onClick = { onRequestReset(ResetScope.THIS_FOLDER) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DarkSurfaceElevated,
+                                contentColor = CrimsonBright
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .border(1.dp, CrimsonPrimary.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                .testTag("btn_reset_current_folder")
+                        ) {
+                            Text(
+                                text = "Reset ${uiState.selectedCategory.label} History",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Reset All
+                        Button(
+                            onClick = { onRequestReset(ResetScope.ALL) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DarkSurfaceElevated,
+                                contentColor = Color(0xFFFBBF24)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .border(1.dp, Color(0xFFFBBF24).copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                .testTag("btn_reset_all")
+                        ) {
+                            Text(
+                                text = "Reset All Folders Review History",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }

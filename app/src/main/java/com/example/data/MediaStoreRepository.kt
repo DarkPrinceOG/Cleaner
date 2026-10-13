@@ -121,7 +121,8 @@ class MediaStoreRepository(
     }
 
     /**
-     * Windowed / paginated fetch of media items according to filter and sort settings.
+     * Windowed / paginated fetch of media items according to category, filter and sort settings.
+     * Excludes media items that have already been reviewed (KEEP, DELETE, or SKIP in Room).
      * Never loads the entire library into memory.
      */
     suspend fun loadMediaPage(
@@ -130,44 +131,73 @@ class MediaStoreRepository(
         settings: CleanerSettings
     ): List<MediaItem> = withContext(Dispatchers.IO) {
         val permission = checkPermissionStatus()
-        val items = mutableListOf<MediaItem>()
+        val allDiscovered = mutableListOf<MediaItem>()
 
         if (permission != PermissionState.DENIED) {
             // Load real items from MediaStore
-            if (settings.filterType != MediaFilterType.VIDEOS_ONLY) {
-                items.addAll(queryMediaItems(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, isVideo = false, settings, page, pageSize))
-            }
-            if (settings.filterType != MediaFilterType.PHOTOS_ONLY) {
-                items.addAll(queryMediaItems(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, isVideo = true, settings, page, pageSize))
+            if (settings.selectedCategory == com.example.model.SmartCategory.VIDEOS) {
+                allDiscovered.addAll(queryMediaItems(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, isVideo = true, settings))
+            } else if (settings.selectedCategory != com.example.model.SmartCategory.ALL_MEDIA && settings.selectedCategory != com.example.model.SmartCategory.VIDEOS) {
+                // Image category
+                allDiscovered.addAll(queryMediaItems(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, isVideo = false, settings))
+            } else {
+                // ALL_MEDIA
+                if (settings.filterType != MediaFilterType.VIDEOS_ONLY) {
+                    allDiscovered.addAll(queryMediaItems(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, isVideo = false, settings))
+                }
+                if (settings.filterType != MediaFilterType.PHOTOS_ONLY) {
+                    allDiscovered.addAll(queryMediaItems(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, isVideo = true, settings))
+                }
             }
         }
 
         // If local library is empty or permission denied, supply realistic curated sample media
-        // so the user can interactively test the full swipe & queue flow
-        if (items.isEmpty()) {
-            return@withContext getSampleMediaItems(settings)
+        val candidates = if (allDiscovered.isEmpty()) {
+            getSampleMediaCandidates()
+        } else {
+            allDiscovered
+        }
+
+        // Persistent Swipe Memory: Exclude photos/videos that have already been reviewed
+        val reviewedUris = reviewDao.getAllReviewedUris().toHashSet()
+        val reviewedIds = reviewDao.getAllReviewedMediaIds().toHashSet()
+        val unreviewed = candidates.filter { it.uri !in reviewedUris && it.id !in reviewedIds }
+
+        // Filter by Smart Category
+        val categoryFiltered = if (settings.selectedCategory != com.example.model.SmartCategory.ALL_MEDIA) {
+            unreviewed.filter { it.category == settings.selectedCategory }
+        } else {
+            unreviewed
+        }
+
+        // Filter by FilterType
+        val typeFiltered = when (settings.filterType) {
+            MediaFilterType.ALL -> categoryFiltered
+            MediaFilterType.PHOTOS_ONLY -> categoryFiltered.filter { !it.isVideo }
+            MediaFilterType.VIDEOS_ONLY -> categoryFiltered.filter { it.isVideo }
+            MediaFilterType.LARGE_FILES -> categoryFiltered.filter { it.sizeBytes >= 25L * 1024 * 1024 }
+            MediaFilterType.SCREENSHOTS -> categoryFiltered.filter { it.category == com.example.model.SmartCategory.SCREENSHOTS }
         }
 
         // Apply sorting
-        when (settings.sortOrder) {
-            SortOrder.DATE_DESC -> items.sortByDescending { it.dateAdded }
-            SortOrder.DATE_ASC -> items.sortBy { it.dateAdded }
-            SortOrder.SIZE_DESC -> items.sortByDescending { it.sizeBytes }
-            SortOrder.SIZE_ASC -> items.sortBy { it.sizeBytes }
+        val sorted = when (settings.sortOrder) {
+            SortOrder.DATE_DESC -> typeFiltered.sortedByDescending { it.dateAdded }
+            SortOrder.DATE_ASC -> typeFiltered.sortedBy { it.dateAdded }
+            SortOrder.SIZE_DESC -> typeFiltered.sortedByDescending { it.sizeBytes }
+            SortOrder.SIZE_ASC -> typeFiltered.sortedBy { it.sizeBytes }
         }
 
-        items.take(pageSize)
+        val offset = (page * pageSize).coerceAtMost(sorted.size)
+        sorted.drop(offset).take(pageSize)
     }
 
     private fun queryMediaItems(
         contentUri: Uri,
         isVideo: Boolean,
-        settings: CleanerSettings,
-        page: Int,
-        pageSize: Int
+        settings: CleanerSettings
     ): List<MediaItem> {
         val result = mutableListOf<MediaItem>()
-        val projection = arrayOf(
+        val projection = mutableListOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.SIZE,
@@ -175,8 +205,16 @@ class MediaStoreRepository(
             MediaStore.MediaColumns.DATE_ADDED,
             MediaStore.MediaColumns.WIDTH,
             MediaStore.MediaColumns.HEIGHT,
-            if (isVideo) MediaStore.Video.Media.DURATION else MediaStore.MediaColumns._ID
+            MediaStore.MediaColumns.BUCKET_DISPLAY_NAME
         )
+        if (isVideo) {
+            projection.add(MediaStore.Video.Media.DURATION)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+        } else {
+            projection.add(MediaStore.MediaColumns.DATA)
+        }
 
         var selection: String? = null
         val selectionArgs = mutableListOf<String>()
@@ -184,46 +222,19 @@ class MediaStoreRepository(
         if (settings.filterType == MediaFilterType.LARGE_FILES) {
             selection = "${MediaStore.MediaColumns.SIZE} >= ?"
             selectionArgs.add((25L * 1024 * 1024).toString())
-        } else if (settings.filterType == MediaFilterType.SCREENSHOTS) {
-            selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-            selectionArgs.add("%screenshot%")
         }
 
-        val sortColumn = when (settings.sortOrder) {
-            SortOrder.DATE_DESC -> "${MediaStore.MediaColumns.DATE_ADDED} DESC"
-            SortOrder.DATE_ASC -> "${MediaStore.MediaColumns.DATE_ADDED} ASC"
-            SortOrder.SIZE_DESC -> "${MediaStore.MediaColumns.SIZE} DESC"
-            SortOrder.SIZE_ASC -> "${MediaStore.MediaColumns.SIZE} ASC"
-        }
-
-        val offset = page * pageSize
+        val sortColumn = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Modern ContentResolver bundle pagination
-                val queryArgs = android.os.Bundle().apply {
-                    putInt(ContentResolver.QUERY_ARG_LIMIT, pageSize)
-                    putInt(ContentResolver.QUERY_ARG_OFFSET, offset)
-                    putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortColumn)
-                    if (selection != null) {
-                        putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
-                        putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs.toTypedArray())
-                    }
-                }
-                contentResolver.query(contentUri, projection, queryArgs, null)?.use { cursor ->
-                    result.addAll(parseCursor(cursor, contentUri, isVideo))
-                }
-            } else {
-                val sortWithLimit = "$sortColumn LIMIT $pageSize OFFSET $offset"
-                contentResolver.query(
-                    contentUri,
-                    projection,
-                    selection,
-                    selectionArgs.toTypedArray().takeIf { it.isNotEmpty() },
-                    sortWithLimit
-                )?.use { cursor ->
-                    result.addAll(parseCursor(cursor, contentUri, isVideo))
-                }
+            contentResolver.query(
+                contentUri,
+                projection.toTypedArray(),
+                selection,
+                selectionArgs.toTypedArray().takeIf { it.isNotEmpty() },
+                sortColumn
+            )?.use { cursor ->
+                result.addAll(parseCursor(cursor, contentUri, isVideo))
             }
         } catch (_: Exception) {
             // Gracefully ignore query errors
@@ -242,6 +253,11 @@ class MediaStoreRepository(
         val widthCol = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
         val heightCol = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
         val durationCol = if (isVideo) cursor.getColumnIndex(MediaStore.Video.Media.DURATION) else -1
+        val bucketCol = cursor.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+        val relPathCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+        } else -1
+        val dataCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
 
         while (cursor.moveToNext()) {
             val id = cursor.getLong(idCol)
@@ -253,6 +269,12 @@ class MediaStoreRepository(
             val width = if (widthCol != -1) cursor.getInt(widthCol) else null
             val height = if (heightCol != -1) cursor.getInt(heightCol) else null
             val duration = if (durationCol != -1) cursor.getLong(durationCol) else null
+            val bucketName = if (bucketCol != -1) cursor.getString(bucketCol) else null
+            val relativePath = if (relPathCol != -1) {
+                cursor.getString(relPathCol)
+            } else if (dataCol != -1) {
+                cursor.getString(dataCol)
+            } else null
 
             list.add(
                 MediaItem(
@@ -266,6 +288,8 @@ class MediaStoreRepository(
                     durationMs = duration,
                     width = width,
                     height = height,
+                    bucketName = bucketName,
+                    relativePath = relativePath,
                     source = MediaSource.LOCAL
                 )
             )
@@ -313,8 +337,50 @@ class MediaStoreRepository(
         }
     }
 
-    private fun getSampleMediaItems(settings: CleanerSettings): List<MediaItem> {
-        val samples = listOf(
+    suspend fun getCategoryStats(): Map<com.example.model.SmartCategory, CategoryStat> = withContext(Dispatchers.IO) {
+        val permission = checkPermissionStatus()
+        val allDiscovered = mutableListOf<MediaItem>()
+
+        if (permission != PermissionState.DENIED) {
+            allDiscovered.addAll(queryMediaItems(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, isVideo = false, CleanerSettings()))
+            allDiscovered.addAll(queryMediaItems(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, isVideo = true, CleanerSettings()))
+        }
+
+        val candidates = if (allDiscovered.isEmpty()) {
+            getSampleMediaCandidates()
+        } else {
+            allDiscovered
+        }
+
+        val reviewedUris = reviewDao.getAllReviewedUris().toHashSet()
+        val reviewedIds = reviewDao.getAllReviewedMediaIds().toHashSet()
+
+        val result = mutableMapOf<com.example.model.SmartCategory, CategoryStat>()
+
+        // ALL_MEDIA
+        val allUnreviewed = candidates.filter { it.uri !in reviewedUris && it.id !in reviewedIds }
+        result[com.example.model.SmartCategory.ALL_MEDIA] = CategoryStat(
+            totalCount = candidates.size,
+            unreviewedCount = allUnreviewed.size,
+            totalBytes = allUnreviewed.sumOf { it.sizeBytes }
+        )
+
+        // Specific categories
+        com.example.model.SmartCategory.entries.filter { it != com.example.model.SmartCategory.ALL_MEDIA }.forEach { cat ->
+            val catCandidates = candidates.filter { it.category == cat }
+            val catUnreviewed = catCandidates.filter { it.uri !in reviewedUris && it.id !in reviewedIds }
+            result[cat] = CategoryStat(
+                totalCount = catCandidates.size,
+                unreviewedCount = catUnreviewed.size,
+                totalBytes = catUnreviewed.sumOf { it.sizeBytes }
+            )
+        }
+
+        result
+    }
+
+    private fun getSampleMediaCandidates(): List<MediaItem> {
+        return listOf(
             MediaItem(
                 id = 1001L,
                 uri = "sample://storage/photos/sunset_hdr_burst_01.jpg",
@@ -326,6 +392,7 @@ class MediaStoreRepository(
                 width = 4032,
                 height = 3024,
                 bucketName = "Camera",
+                relativePath = "DCIM/Camera/",
                 source = MediaSource.SAMPLE
             ),
             MediaItem(
@@ -340,6 +407,7 @@ class MediaStoreRepository(
                 width = 3840,
                 height = 2160,
                 bucketName = "DJI Drone",
+                relativePath = "DCIM/Camera/",
                 source = MediaSource.SAMPLE
             ),
             MediaItem(
@@ -353,6 +421,7 @@ class MediaStoreRepository(
                 width = 2400,
                 height = 3200,
                 bucketName = "Documents",
+                relativePath = "Documents/",
                 source = MediaSource.SAMPLE
             ),
             MediaItem(
@@ -366,6 +435,7 @@ class MediaStoreRepository(
                 width = 1080,
                 height = 2400,
                 bucketName = "Screenshots",
+                relativePath = "Pictures/Screenshots/",
                 source = MediaSource.SAMPLE
             ),
             MediaItem(
@@ -380,6 +450,7 @@ class MediaStoreRepository(
                 width = 1080,
                 height = 2400,
                 bucketName = "Screen Recordings",
+                relativePath = "Movies/Screen Records/",
                 source = MediaSource.SAMPLE
             ),
             MediaItem(
@@ -393,6 +464,7 @@ class MediaStoreRepository(
                 width = 4032,
                 height = 3024,
                 bucketName = "Camera",
+                relativePath = "DCIM/Camera/",
                 source = MediaSource.SAMPLE
             ),
             MediaItem(
@@ -407,6 +479,7 @@ class MediaStoreRepository(
                 width = 1920,
                 height = 1080,
                 bucketName = "Camera",
+                relativePath = "DCIM/Camera/",
                 source = MediaSource.SAMPLE
             ),
             MediaItem(
@@ -420,26 +493,74 @@ class MediaStoreRepository(
                 width = 1080,
                 height = 1350,
                 bucketName = "WhatsApp Images",
+                relativePath = "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/",
+                source = MediaSource.SAMPLE
+            ),
+            MediaItem(
+                id = 1009L,
+                uri = "sample://storage/photos/downloaded_infographic_highres.jpg",
+                displayName = "downloaded_infographic_highres.jpg",
+                sizeBytes = 9L * 1024 * 1024 + 500L * 1024,
+                mimeType = "image/jpeg",
+                dateAdded = System.currentTimeMillis() / 1000 - 3600 * 220,
+                isVideo = false,
+                width = 2048,
+                height = 1536,
+                bucketName = "Download",
+                relativePath = "Download/",
+                source = MediaSource.SAMPLE
+            ),
+            MediaItem(
+                id = 1010L,
+                uri = "sample://storage/photos/screenshot_order_receipt_app.png",
+                displayName = "screenshot_order_receipt_app.png",
+                sizeBytes = 3L * 1024 * 1024 + 800L * 1024,
+                mimeType = "image/png",
+                dateAdded = System.currentTimeMillis() / 1000 - 3600 * 250,
+                isVideo = false,
+                width = 1080,
+                height = 2400,
+                bucketName = "Screenshots",
+                relativePath = "Pictures/Screenshots/",
+                source = MediaSource.SAMPLE
+            ),
+            MediaItem(
+                id = 1011L,
+                uri = "sample://storage/photos/whatsapp_family_group_photo.jpg",
+                displayName = "whatsapp_family_group_photo.jpg",
+                sizeBytes = 5L * 1024 * 1024 + 200L * 1024,
+                mimeType = "image/jpeg",
+                dateAdded = System.currentTimeMillis() / 1000 - 3600 * 280,
+                isVideo = false,
+                width = 1920,
+                height = 1080,
+                bucketName = "WhatsApp Images",
+                relativePath = "WhatsApp/Media/WhatsApp Images/",
+                source = MediaSource.SAMPLE
+            ),
+            MediaItem(
+                id = 1012L,
+                uri = "sample://storage/photos/artwork_wallpaper_abstract.png",
+                displayName = "artwork_wallpaper_abstract.png",
+                sizeBytes = 8L * 1024 * 1024 + 400L * 1024,
+                mimeType = "image/png",
+                dateAdded = System.currentTimeMillis() / 1000 - 3600 * 300,
+                isVideo = false,
+                width = 2560,
+                height = 1440,
+                bucketName = "Wallpapers",
+                relativePath = "Pictures/Wallpapers/",
                 source = MediaSource.SAMPLE
             )
         )
-
-        val filtered = when (settings.filterType) {
-            MediaFilterType.ALL -> samples
-            MediaFilterType.PHOTOS_ONLY -> samples.filter { !it.isVideo }
-            MediaFilterType.VIDEOS_ONLY -> samples.filter { it.isVideo }
-            MediaFilterType.LARGE_FILES -> samples.filter { it.sizeBytes > 25L * 1024 * 1024 }
-            MediaFilterType.SCREENSHOTS -> samples.filter { it.displayName.contains("screenshot", ignoreCase = true) }
-        }
-
-        return when (settings.sortOrder) {
-            SortOrder.DATE_DESC -> filtered.sortedByDescending { it.dateAdded }
-            SortOrder.DATE_ASC -> filtered.sortedBy { it.dateAdded }
-            SortOrder.SIZE_DESC -> filtered.sortedByDescending { it.sizeBytes }
-            SortOrder.SIZE_ASC -> filtered.sortedBy { it.sizeBytes }
-        }
     }
 }
+
+data class CategoryStat(
+    val totalCount: Int,
+    val unreviewedCount: Int,
+    val totalBytes: Long
+)
 
 enum class PermissionState {
     FULL_ACCESS,

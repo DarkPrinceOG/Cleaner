@@ -67,11 +67,14 @@ import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkSurfaceElevated
 import com.example.ui.theme.EmeraldKeep
 import com.example.ui.theme.SkyPhotos
+import com.example.model.SmartCategory
+import com.example.ui.components.SmartCategoryBar
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.CleanerUiState
+import com.example.viewmodel.ResetScope
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,7 +83,8 @@ fun HomeScreen(
     onNavigate: (AppScreen) -> Unit,
     onStartCleaning: () -> Unit,
     onRefreshStats: () -> Unit,
-    onSelectFilter: (MediaFilterType) -> Unit,
+    onSelectCategory: (SmartCategory) -> Unit,
+    onRequestReset: (ResetScope) -> Unit,
     onCheckPermissions: () -> Unit
 ) {
     // Permission launcher for media permissions
@@ -234,46 +238,45 @@ fun HomeScreen(
                 }
             }
 
-            // Quick Filter Row
+            // Smart Media Folders Row
             item {
                 Column {
-                    Text(
-                        text = "CLEANING TARGET",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
-                        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-                    )
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FilterPill(
-                            label = "All Media",
-                            selected = uiState.settings.filterType == MediaFilterType.ALL,
-                            onClick = { onSelectFilter(MediaFilterType.ALL) },
-                            modifier = Modifier.weight(1f)
+                        Text(
+                            text = "SMART MEDIA FOLDERS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
                         )
-                        FilterPill(
-                            label = "Photos",
-                            selected = uiState.settings.filterType == MediaFilterType.PHOTOS_ONLY,
-                            onClick = { onSelectFilter(MediaFilterType.PHOTOS_ONLY) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterPill(
-                            label = "Videos",
-                            selected = uiState.settings.filterType == MediaFilterType.VIDEOS_ONLY,
-                            onClick = { onSelectFilter(MediaFilterType.VIDEOS_ONLY) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterPill(
-                            label = ">25MB",
-                            selected = uiState.settings.filterType == MediaFilterType.LARGE_FILES,
-                            onClick = { onSelectFilter(MediaFilterType.LARGE_FILES) },
-                            modifier = Modifier.weight(1f)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Reset History",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CrimsonBright,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        onRequestReset(ResetScope.THIS_FOLDER)
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .testTag("btn_home_reset_folder")
+                            )
+                        }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SmartCategoryBar(
+                        selectedCategory = uiState.settings.selectedCategory,
+                        categoryStats = uiState.categoryStats,
+                        onSelectCategory = onSelectCategory
+                    )
                 }
             }
 

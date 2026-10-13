@@ -1,15 +1,21 @@
 package com.example.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.model.MediaItem
 import com.example.model.MediaSource
 import com.example.model.ReviewDecision
+import com.example.model.SmartCategory
 
 @Entity(
     tableName = "review_items",
-    indices = [Index(value = ["uri"], unique = true)]
+    indices = [
+        Index(value = ["uri"], unique = true),
+        Index(value = ["category"]),
+        Index(value = ["decision"])
+    ]
 )
 data class ReviewItemEntity(
     @PrimaryKey(autoGenerate = true)
@@ -22,7 +28,9 @@ data class ReviewItemEntity(
     val isVideo: Boolean,
     val decision: String,
     val decidedAt: Long = System.currentTimeMillis(),
-    val durationMs: Long? = null
+    val durationMs: Long? = null,
+    @ColumnInfo(name = "category", defaultValue = "all_media")
+    val category: String = SmartCategory.ALL_MEDIA.id
 ) {
     fun toMediaItem(): MediaItem {
         return MediaItem(
@@ -49,7 +57,8 @@ data class ReviewItemEntity(
                 isVideo = item.isVideo,
                 decision = decision.name,
                 decidedAt = System.currentTimeMillis(),
-                durationMs = item.durationMs
+                durationMs = item.durationMs,
+                category = item.category.id
             )
         }
     }

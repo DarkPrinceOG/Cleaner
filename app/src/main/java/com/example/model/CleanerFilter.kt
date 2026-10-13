@@ -16,6 +16,7 @@ enum class SortOrder(val label: String) {
 }
 
 data class CleanerSettings(
+    val selectedCategory: SmartCategory = SmartCategory.ALL_MEDIA,
     val filterType: MediaFilterType = MediaFilterType.ALL,
     val sortOrder: SortOrder = SortOrder.SIZE_DESC,
     val autoPlayVideo: Boolean = true,

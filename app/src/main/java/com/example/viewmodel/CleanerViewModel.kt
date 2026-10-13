@@ -13,10 +13,12 @@ import com.example.data.MediaStoreRepository
 import com.example.data.PermissionState
 import com.example.data.ReviewDao
 import com.example.data.ReviewItemEntity
+import com.example.data.CategoryStat
 import com.example.model.CleanerSettings
 import com.example.model.MediaFilterType
 import com.example.model.MediaItem
 import com.example.model.ReviewDecision
+import com.example.model.SmartCategory
 import com.example.model.SortOrder
 import com.example.model.StorageStats
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +38,11 @@ enum class AppScreen {
     SETTINGS
 }
 
+enum class ResetScope {
+    THIS_FOLDER,
+    ALL
+}
+
 data class CleanerUiState(
     val currentScreen: AppScreen = AppScreen.HOME,
     val storageStats: StorageStats = StorageStats(),
@@ -45,10 +52,17 @@ data class CleanerUiState(
     val markedTotalBytes: Long = 0L,
     val markedCount: Int = 0,
     val totalReviewedCount: Int = 0,
+    val categoryStats: Map<SmartCategory, CategoryStat> = emptyMap(),
     val permissionState: PermissionState = PermissionState.DENIED,
     val settings: CleanerSettings = CleanerSettings(),
     val isScanning: Boolean = false,
     val isDeleting: Boolean = false,
+    val isResetting: Boolean = false,
+    val showResetConfirmationDialog: Boolean = false,
+    val resetScope: ResetScope = ResetScope.THIS_FOLDER,
+    val resetTargetCategory: SmartCategory = SmartCategory.ALL_MEDIA,
+    val resetAffectedCount: Int = 0,
+    val resetPendingDeleteCount: Int = 0,
     val cloudAuthStatus: CloudAuthStatus = CloudAuthStatus.ScopedPickerReady,
     val cloudSession: CloudCleanSession = CloudCleanSession(),
     val showDeleteConfirmationDialog: Boolean = false,
@@ -58,6 +72,9 @@ data class CleanerUiState(
 ) {
     val currentMedia: MediaItem?
         get() = mediaQueue.getOrNull(currentIndex)
+
+    val selectedCategory: SmartCategory
+        get() = settings.selectedCategory
 
     val hasCardsRemaining: Boolean
         get() = currentIndex < mediaQueue.size
@@ -137,8 +154,15 @@ class CleanerViewModel(application: Application) : AndroidViewModel(application)
     fun loadStorageStats() {
         viewModelScope.launch {
             val stats = mediaRepository.getStorageStats()
-            _uiState.update { it.copy(storageStats = stats) }
+            val catStats = mediaRepository.getCategoryStats()
+            _uiState.update { it.copy(storageStats = stats, categoryStats = catStats) }
         }
+    }
+
+    fun selectCategory(category: SmartCategory) {
+        if (_uiState.value.settings.selectedCategory == category) return
+        _uiState.update { it.copy(settings = it.settings.copy(selectedCategory = category)) }
+        refreshMediaList()
     }
 
     fun refreshMediaList() {
@@ -150,10 +174,12 @@ class CleanerViewModel(application: Application) : AndroidViewModel(application)
                 pageSize = pageSize,
                 settings = _uiState.value.settings
             )
+            val catStats = mediaRepository.getCategoryStats()
             _uiState.update {
                 it.copy(
                     mediaQueue = items,
                     currentIndex = 0,
+                    categoryStats = catStats,
                     isScanning = false
                 )
             }
@@ -175,7 +201,7 @@ class CleanerViewModel(application: Application) : AndroidViewModel(application)
         val currentItem = _uiState.value.currentMedia ?: return
 
         viewModelScope.launch {
-            // Save to Room persistent storage
+            // Save to Room persistent storage with category
             val entity = ReviewItemEntity.fromMediaItem(currentItem, decision)
             reviewDao.insertOrUpdate(entity)
 
@@ -188,9 +214,82 @@ class CleanerViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
 
+            // Refresh category stats in background
+            val catStats = mediaRepository.getCategoryStats()
+            _uiState.update { it.copy(categoryStats = catStats) }
+
             // If we are nearing end of batch, load next page
             if (_uiState.value.currentIndex >= _uiState.value.mediaQueue.size - 3) {
                 loadNextBatch()
+            }
+        }
+    }
+
+    /**
+     * Prepares and opens confirmation dialog for resetting review history.
+     * Prevents repeated invocations while one is running.
+     */
+    fun requestResetHistory(scope: ResetScope) {
+        if (_uiState.value.isResetting) return
+        val targetCat = if (scope == ResetScope.THIS_FOLDER) _uiState.value.settings.selectedCategory else SmartCategory.ALL_MEDIA
+        viewModelScope.launch {
+            val affectedCount = if (scope == ResetScope.THIS_FOLDER) {
+                reviewDao.getCountOfKeepSkipForCategory(targetCat.id)
+            } else {
+                reviewDao.getCountOfKeepSkipAll()
+            }
+            val pendingCount = if (scope == ResetScope.THIS_FOLDER) {
+                reviewDao.getCountOfPendingDeleteForCategory(targetCat.id)
+            } else {
+                _uiState.value.markedCount
+            }
+            _uiState.update {
+                it.copy(
+                    showResetConfirmationDialog = true,
+                    resetScope = scope,
+                    resetTargetCategory = targetCat,
+                    resetAffectedCount = affectedCount,
+                    resetPendingDeleteCount = pendingCount
+                )
+            }
+        }
+    }
+
+    fun dismissResetDialog() {
+        _uiState.update { it.copy(showResetConfirmationDialog = false) }
+    }
+
+    /**
+     * Executes the review history reset.
+     * CRITICAL SAFETY RULE:
+     * Never deletes real files, and NEVER deletes pending DELETE records from Room.
+     * Only clears KEEP and SKIP records so photos can be reviewed again.
+     */
+    fun confirmResetHistory() {
+        if (_uiState.value.isResetting) return
+        _uiState.update { it.copy(isResetting = true) }
+        viewModelScope.launch {
+            val scope = _uiState.value.resetScope
+            val targetCategory = _uiState.value.resetTargetCategory
+            val resetCount = if (scope == ResetScope.THIS_FOLDER) {
+                reviewDao.resetKeepSkipHistoryForCategory(targetCategory.id)
+            } else {
+                reviewDao.resetAllKeepSkipHistory()
+            }
+
+            loadStorageStats()
+            refreshMediaList()
+
+            _uiState.update {
+                it.copy(
+                    isResetting = false,
+                    showResetConfirmationDialog = false,
+                    snackbarMessage = if (scope == ResetScope.THIS_FOLDER) {
+                        "Reset review history for ${targetCategory.label} ($resetCount files restored to queue)"
+                    } else {
+                        "Reset all review history ($resetCount files restored to queue)"
+                    }
+                )
             }
         }
     }
